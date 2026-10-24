@@ -11,7 +11,10 @@ export interface User {
   roleTitle: string; // e.g. "Dyrektor Szkoły", "Wychowawca kl. 3A", "Uczeń", "Rodzic"
   className?: string; // e.g. "3A"
   studentId?: string; // for parent/student
+  studentName?: string; // for parent account: name of linked student
   subjectsTaught?: string[];
+  isHomeroom?: boolean; // for teacher: whether they are homeroom teacher
+  homeroomClass?: string; // for teacher: which class they are homeroom teacher of
 }
 
 export interface SystemConfig {

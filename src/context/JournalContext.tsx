@@ -80,6 +80,10 @@ interface JournalContextType {
     parentName?: string;
     parentEmail?: string;
     pesel?: string;
+    isHomeroom?: boolean;
+    homeroomClass?: string;
+    studentId?: string;
+    studentName?: string;
   }) => User;
   updateUserByAdmin: (id: string, updated: Partial<User>) => void;
   deleteUserByAdmin: (id: string) => void;
@@ -131,6 +135,7 @@ interface JournalContextType {
   addLesson: (lesson: Omit<TimetableLesson, 'id'>) => void;
   updateLesson: (id: string, updated: Partial<TimetableLesson>) => void;
   deleteLesson: (id: string) => void;
+  replaceTimetableForClass: (className: string, lessons: Omit<TimetableLesson, 'id'>[]) => void;
 
   // Messages methods
   sendMessage: (msg: { recipientId: string; recipientName: string; subject: string; content: string }) => void;
@@ -687,9 +692,13 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
     parentName?: string;
     parentEmail?: string;
     pesel?: string;
+    isHomeroom?: boolean;
+    homeroomClass?: string;
+    studentId?: string;
+    studentName?: string;
   }): User => {
     const userId = 'user_' + Date.now();
-    let studentId: string | undefined = undefined;
+    let studentId: string | undefined = params.studentId;
 
     if (params.role === 'student') {
       studentId = 'st_' + Date.now();
@@ -700,7 +709,7 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
         id: studentId,
         firstName,
         lastName,
-        className: params.className || '3A',
+        className: params.className || '4A',
         numberInJournal: students.length + 1,
         pesel: params.pesel || ('08' + Math.floor(100000000 + Math.random() * 900000000)),
         parentName: params.parentName || `Rodzic (${lastName})`,
@@ -709,12 +718,34 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setStudents(prev => [...prev, newStudent]);
     }
 
-    const roleTitles: Record<UserRole, string> = {
-      admin: 'Administrator Placówki',
-      teacher: params.subjectsTaught?.length ? `Nauczyciel (${params.subjectsTaught.join(', ')})` : 'Nauczyciel',
-      student: `Uczeń kl. ${params.className || '3A'}`,
-      parent: `Rodzic ucznia ${params.name}`,
-    };
+    const assignedClassName =
+      params.role === 'student'
+        ? params.className || '4A'
+        : params.role === 'teacher' && params.isHomeroom
+        ? params.homeroomClass
+        : params.className;
+
+    let roleTitle = 'Użytkownik';
+    if (params.role === 'admin') {
+      roleTitle = 'Administrator Placówki';
+    } else if (params.role === 'teacher') {
+      if (params.isHomeroom && params.homeroomClass) {
+        const subs = params.subjectsTaught?.length ? ` (${params.subjectsTaught.join(', ')})` : '';
+        roleTitle = `Wychowawca kl. ${params.homeroomClass}${subs}`;
+      } else if (params.subjectsTaught?.length) {
+        roleTitle = `Nauczyciel (${params.subjectsTaught.join(', ')})`;
+      } else {
+        roleTitle = 'Nauczyciel';
+      }
+    } else if (params.role === 'student') {
+      roleTitle = `Uczeń kl. ${params.className || '4A'}`;
+    } else if (params.role === 'parent') {
+      if (params.studentName) {
+        roleTitle = `Rodzic ucznia ${params.studentName}${params.className ? ` (kl. ${params.className})` : ''}`;
+      } else {
+        roleTitle = `Rodzic (${params.name})`;
+      }
+    }
 
     const newUser: User = {
       id: userId,
@@ -722,15 +753,20 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       email: params.email.trim(),
       password: params.password || 'haslo123',
       role: params.role,
-      roleTitle: roleTitles[params.role],
-      className: params.className,
+      roleTitle,
+      className: assignedClassName,
       studentId,
+      studentName: params.studentName,
       subjectsTaught: params.subjectsTaught,
+      isHomeroom: params.isHomeroom,
+      homeroomClass: params.homeroomClass,
       createdAt: new Date().toISOString().split('T')[0],
       avatar: params.role === 'admin'
         ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80'
         : params.role === 'teacher'
         ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=256&q=80'
+        : params.role === 'parent'
+        ? 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=256&q=80'
         : 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
     };
 
@@ -1057,6 +1093,17 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setTimetable(prev => prev.filter(l => l.id !== id));
   };
 
+  const replaceTimetableForClass = (className: string, newLessons: Omit<TimetableLesson, 'id'>[]) => {
+    setTimetable(prev => {
+      const otherClasses = prev.filter(l => l.className !== className);
+      const generated: TimetableLesson[] = newLessons.map((l, idx) => ({
+        ...l,
+        id: 'tt_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+      }));
+      return [...otherClasses, ...generated];
+    });
+  };
+
   // Messages
   const sendMessage = (msg: { recipientId: string; recipientName: string; subject: string; content: string }) => {
     if (!currentUser) return;
@@ -1268,6 +1315,7 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addLesson,
         updateLesson,
         deleteLesson,
+        replaceTimetableForClass,
         sendMessage,
         markMessageAsRead,
         toggleMessageStar,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useJournal } from '../context/JournalContext';
 import { AttendanceStatus, Student, UserRole, User } from '../types';
-import { LESSON_BELLS } from '../data/initialData';
+import { LESSON_BELLS, ALL_SCHOOL_CLASSES } from '../data/initialData';
 import { AddGradeModal } from './AddGradeModal';
 import {
   ShieldCheck,
@@ -101,11 +101,24 @@ export const AdminPanelView: React.FC = () => {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('haslo123');
   const [newUserRole, setNewUserRole] = useState<UserRole>('student');
-  const [newUserClass, setNewUserClass] = useState('3A');
+  const [newUserClass, setNewUserClass] = useState('4A');
+  const [isCustomStudentClass, setIsCustomStudentClass] = useState(false);
+  const [customStudentClassInput, setCustomStudentClassInput] = useState('');
   const [newUserPesel, setNewUserPesel] = useState('');
   const [newUserParentName, setNewParentName] = useState('');
   const [newUserParentEmail, setNewParentEmail] = useState('');
   const [selectedSubjectsTaught, setSelectedSubjectsTaught] = useState<string[]>(['Matematyka']);
+
+  // Teacher homeroom state
+  const [teacherIsHomeroom, setTeacherIsHomeroom] = useState(false);
+  const [teacherHomeroomClass, setTeacherHomeroomClass] = useState('4A');
+
+  // Parent child selection state
+  const [parentMode, setParentMode] = useState<'existing' | 'custom'>('existing');
+  const [parentSelectedStudentId, setParentSelectedStudentId] = useState<string>('');
+  const [parentCustomChildName, setParentCustomChildName] = useState('');
+  const [parentCustomChildClass, setParentCustomChildClass] = useState('4A');
+
   const [userToast, setUserToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
 
   // --- SCHOOL PROFILE SETTINGS STATE ---
@@ -184,13 +197,48 @@ export const AdminPanelView: React.FC = () => {
       return;
     }
 
+    // Resolve class for student
+    const resolvedStudentClass = isCustomStudentClass
+      ? customStudentClassInput.trim() || '4A'
+      : newUserClass;
+
+    // Resolve parent's child
+    let parentLinkedStudentId: string | undefined = undefined;
+    let parentLinkedStudentName: string | undefined = undefined;
+    let parentLinkedClass: string | undefined = undefined;
+
+    if (newUserRole === 'parent') {
+      if (parentMode === 'existing' && parentSelectedStudentId) {
+        const foundStudent = students.find(s => s.id === parentSelectedStudentId);
+        if (foundStudent) {
+          parentLinkedStudentId = foundStudent.id;
+          parentLinkedStudentName = `${foundStudent.firstName} ${foundStudent.lastName}`;
+          parentLinkedClass = foundStudent.className;
+        }
+      } else if (parentMode === 'custom' && parentCustomChildName.trim()) {
+        parentLinkedStudentName = parentCustomChildName.trim();
+        parentLinkedClass = parentCustomChildClass.trim() || undefined;
+      }
+    }
+
     const created = createUserByAdmin({
       name: newUserName.trim(),
       email: newUserEmail.trim(),
       password: newUserPassword.trim() || 'haslo123',
       role: newUserRole,
-      className: newUserRole === 'student' ? newUserClass : undefined,
+      className:
+        newUserRole === 'student'
+          ? resolvedStudentClass
+          : newUserRole === 'parent'
+          ? parentLinkedClass
+          : newUserRole === 'teacher' && teacherIsHomeroom
+          ? teacherHomeroomClass
+          : undefined,
       subjectsTaught: newUserRole === 'teacher' ? selectedSubjectsTaught : undefined,
+      isHomeroom: newUserRole === 'teacher' ? teacherIsHomeroom : undefined,
+      homeroomClass: newUserRole === 'teacher' && teacherIsHomeroom ? teacherHomeroomClass : undefined,
+      studentId: newUserRole === 'parent' ? parentLinkedStudentId : undefined,
+      studentName: newUserRole === 'parent' ? parentLinkedStudentName : undefined,
       parentName: newUserRole === 'student' ? newUserParentName.trim() : undefined,
       parentEmail: newUserRole === 'student' ? newUserParentEmail.trim() : undefined,
       pesel: newUserRole === 'student' ? newUserPesel.trim() : undefined,
@@ -207,6 +255,13 @@ export const AdminPanelView: React.FC = () => {
     setNewUserPesel('');
     setNewParentName('');
     setNewParentEmail('');
+    setIsCustomStudentClass(false);
+    setCustomStudentClassInput('');
+    setTeacherIsHomeroom(false);
+    setTeacherHomeroomClass('4A');
+    setParentSelectedStudentId('');
+    setParentCustomChildName('');
+    setParentCustomChildClass('4A');
     setShowCreateUserForm(false);
   };
 
@@ -696,22 +751,61 @@ export const AdminPanelView: React.FC = () => {
                   <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-200/80 space-y-3">
                     <div className="font-bold text-blue-900 flex items-center space-x-1.5">
                       <GraduationCap className="w-4 h-4 text-blue-700" />
-                      <span>Dane ucznia i oddziału klasowego (automatyczny wpis do dziennika lekcyjnego)</span>
+                      <span>Dane ucznia i oddziału klasowego (wszystkie klasy placówki)</span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                       <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Klasa</label>
-                        <select
-                          value={newUserClass}
-                          onChange={e => setNewUserClass(e.target.value)}
-                          className="w-full p-2 border border-slate-300 rounded-lg bg-white"
-                        >
-                          <option value="3A">Klasa 3A (Profil Mat-Fiz)</option>
-                          <option value="3B">Klasa 3B (Profil Humanistyczny)</option>
-                          <option value="2A">Klasa 2A</option>
-                          <option value="1A">Klasa 1A</option>
-                        </select>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Klasa <span className="text-red-500">*</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIsCustomStudentClass(!isCustomStudentClass)}
+                            className="text-[10px] text-blue-600 hover:underline font-bold cursor-pointer"
+                          >
+                            {isCustomStudentClass ? 'Wybierz z listy' : '+ Wpisz inną'}
+                          </button>
+                        </div>
+                        {isCustomStudentClass ? (
+                          <input
+                            type="text"
+                            required
+                            placeholder="np. 4D, 1F, Zerówka"
+                            value={customStudentClassInput}
+                            onChange={e => setCustomStudentClassInput(e.target.value)}
+                            className="w-full p-2 border border-blue-400 rounded-lg bg-white font-bold text-blue-900"
+                          />
+                        ) : (
+                          <select
+                            value={newUserClass}
+                            onChange={e => setNewUserClass(e.target.value)}
+                            className="w-full p-2 border border-slate-300 rounded-lg bg-white font-semibold text-slate-800"
+                          >
+                            <optgroup label="Szkoła Podstawowa (Klasy 4–8)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[4-8][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Szkoła Podstawowa (Klasy 1–3)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-3][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Szkoły Ponadpodstawowe (Liceum / Technikum)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-5][L|T]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        )}
                       </div>
 
                       <div>
@@ -752,35 +846,218 @@ export const AdminPanelView: React.FC = () => {
 
                 {/* Role Specific Fields: Teacher */}
                 {newUserRole === 'teacher' && (
-                  <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-2">
+                  <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-200/80 space-y-3">
                     <div className="font-bold text-emerald-900 flex items-center space-x-1.5">
                       <BookOpen className="w-4 h-4 text-emerald-700" />
-                      <span>Nauczane przedmioty:</span>
+                      <span>Nauczane przedmioty i wychowawstwo klasy:</span>
                     </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {['Matematyka', 'Język polski', 'Język angielski', 'Fizyka', 'Chemia', 'Biologia', 'Historia', 'Informatyka', 'Geografia', 'Wychowanie fizyczne'].map(sub => (
-                        <label
-                          key={sub}
-                          className={`px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
-                            selectedSubjectsTaught.includes(sub)
-                              ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
-                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="hidden"
-                            checked={selectedSubjectsTaught.includes(sub)}
-                            onChange={() => {
-                              setSelectedSubjectsTaught(prev =>
-                                prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]
-                              );
-                            }}
-                          />
-                          <span>{sub}</span>
+
+                    {/* Homeroom teacher toggle */}
+                    <div className="p-3 bg-white rounded-xl border border-emerald-200 space-y-2">
+                      <label className="flex items-center space-x-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={teacherIsHomeroom}
+                          onChange={e => setTeacherIsHomeroom(e.target.checked)}
+                          className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <span className="font-bold text-slate-800 text-xs">
+                          Ten nauczyciel pełni funkcję wychowawcy klasy (oddziału)
+                        </span>
+                      </label>
+
+                      {teacherIsHomeroom && (
+                        <div className="pl-6 pt-1 flex flex-wrap items-center gap-3">
+                          <label className="text-xs font-semibold text-slate-700 shrink-0">
+                            Wychowawca klasy:
+                          </label>
+                          <select
+                            value={teacherHomeroomClass}
+                            onChange={e => setTeacherHomeroomClass(e.target.value)}
+                            className="p-1.5 border border-emerald-300 rounded-lg bg-emerald-50/50 font-bold text-emerald-900 text-xs"
+                          >
+                            <optgroup label="Szkoła Podstawowa (Klasy 4–8)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[4-8][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Szkoła Podstawowa (Klasy 1–3)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-3][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Liceum / Technikum">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-5][L|T]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                          <span className="text-[11px] text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded font-bold">
+                            Tytuł: Wychowawca kl. {teacherHomeroomClass}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] font-bold text-slate-600 mb-1.5">
+                        Wybierz nauczane przedmioty:
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          'Matematyka',
+                          'Język polski',
+                          'Język angielski',
+                          'Język niemiecki',
+                          'Fizyka',
+                          'Chemia',
+                          'Biologia',
+                          'Historia',
+                          'Informatyka',
+                          'Geografia',
+                          'Przyroda',
+                          'Plastyka',
+                          'Muzyka',
+                          'Wychowanie fizyczne',
+                        ].map(sub => (
+                          <label
+                            key={sub}
+                            className={`px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-all flex items-center space-x-1.5 ${
+                              selectedSubjectsTaught.includes(sub)
+                                ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={selectedSubjectsTaught.includes(sub)}
+                              onChange={() => {
+                                setSelectedSubjectsTaught(prev =>
+                                  prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]
+                                );
+                              }}
+                            />
+                            <span>{sub}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Role Specific Fields: Parent */}
+                {newUserRole === 'parent' && (
+                  <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-3">
+                    <div className="font-bold text-amber-900 flex items-center space-x-1.5">
+                      <Users className="w-4 h-4 text-amber-700" />
+                      <span>Powiązanie konta rodzica z dzieckiem (uczniem):</span>
+                    </div>
+
+                    <div className="flex items-center space-x-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setParentMode('existing')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border transition-all cursor-pointer ${
+                          parentMode === 'existing'
+                            ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Wybierz z listy zarejestrowanych uczniów
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setParentMode('custom')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border transition-all cursor-pointer ${
+                          parentMode === 'custom'
+                            ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Wpisz dziecko ręcznie
+                      </button>
+                    </div>
+
+                    {parentMode === 'existing' ? (
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Wybierz dziecko (ucznia) ze spisu szkoły:
                         </label>
-                      ))}
-                    </div>
+                        <select
+                          value={parentSelectedStudentId}
+                          onChange={e => setParentSelectedStudentId(e.target.value)}
+                          className="w-full p-2.5 border border-amber-300 rounded-lg bg-white font-medium text-slate-800 text-xs"
+                        >
+                          <option value="">-- Wybierz ucznia z listy --</option>
+                          {students.map(s => (
+                            <option key={s.id} value={s.id}>
+                              {s.firstName} {s.lastName} (Klasa: {s.className}, nr w dzienniku: {s.numberInJournal})
+                            </option>
+                          ))}
+                        </select>
+                        {parentSelectedStudentId && (
+                          <p className="text-[11px] text-amber-800 mt-1 font-semibold">
+                            ✓ Po zalogowaniu rodzic uzyska pełny podgląd ocen i frekwencji ucznia{' '}
+                            {students.find(s => s.id === parentSelectedStudentId)?.firstName}{' '}
+                            {students.find(s => s.id === parentSelectedStudentId)?.lastName}.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Imię i nazwisko dziecka <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={parentCustomChildName}
+                            onChange={e => setParentCustomChildName(e.target.value)}
+                            placeholder="np. Jakub Kowalczyk"
+                            className="w-full p-2 border border-amber-300 rounded-lg bg-white text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                            Klasa dziecka
+                          </label>
+                          <select
+                            value={parentCustomChildClass}
+                            onChange={e => setParentCustomChildClass(e.target.value)}
+                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-semibold text-slate-800"
+                          >
+                            <optgroup label="Szkoła Podstawowa (Klasy 4–8)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[4-8][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Szkoła Podstawowa (Klasy 1–3)">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-3][A-Z]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Szkoły Ponadpodstawowe">
+                              {ALL_SCHOOL_CLASSES.filter(c => /^[1-5][L|T]$/.test(c)).map(cls => (
+                                <option key={cls} value={cls}>
+                                  Klasa {cls}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </select>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -906,11 +1183,47 @@ export const AdminPanelView: React.FC = () => {
                         </td>
 
                         <td className="py-3 px-3 text-slate-600 text-[11px]">
-                          {user.className && <div>Klasa: {user.className}</div>}
-                          {user.subjectsTaught && user.subjectsTaught.length > 0 && (
-                            <div className="truncate max-w-[140px] text-[10px] text-slate-500">
-                              {user.subjectsTaught.join(', ')}
+                          {user.role === 'teacher' && (
+                            <div className="space-y-1">
+                              {user.isHomeroom && user.homeroomClass && (
+                                <span className="inline-flex items-center text-[10px] bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold px-1.5 py-0.5 rounded shadow-2xs">
+                                  <Award className="w-3 h-3 mr-1 text-emerald-700 shrink-0" />
+                                  Wychowawca kl. {user.homeroomClass}
+                                </span>
+                              )}
+                              {user.subjectsTaught && user.subjectsTaught.length > 0 && (
+                                <div className="truncate max-w-[150px] text-[10px] text-slate-500">
+                                  {user.subjectsTaught.join(', ')}
+                                </div>
+                              )}
                             </div>
+                          )}
+                          {user.role === 'parent' && (
+                            <div className="space-y-1">
+                              {user.studentName ? (
+                                <span className="inline-flex items-center text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded shadow-2xs">
+                                  <Users className="w-3 h-3 mr-1 text-amber-700 shrink-0" />
+                                  Dziecko: {user.studentName}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">Brak przypisanego dziecka</span>
+                              )}
+                              {user.className && (
+                                <div className="text-[10px] text-slate-500 font-medium">Klasa: {user.className}</div>
+                              )}
+                            </div>
+                          )}
+                          {user.role === 'student' && (
+                            <div>
+                              <span className="inline-flex items-center text-[10px] bg-blue-100 text-blue-900 border border-blue-300 font-bold px-2 py-0.5 rounded">
+                                Klasa: {user.className || 'Brak'}
+                              </span>
+                            </div>
+                          )}
+                          {user.role === 'admin' && (
+                            <span className="text-[10px] text-purple-700 font-semibold">
+                              Dyrektor / Pełne uprawnienia placówki
+                            </span>
                           )}
                         </td>
 

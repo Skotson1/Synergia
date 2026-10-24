@@ -25,6 +25,22 @@ export const LESSON_BELLS: LessonBell[] = [
   { hour: 8, start: '14:35', end: '15:20' },
 ];
 
+export const ALL_SCHOOL_CLASSES: string[] = [
+  // Szkoła podstawowa: klasy 1-3
+  '1A', '1B', '1C',
+  '2A', '2B', '2C',
+  '3A', '3B', '3C',
+  // Szkoła podstawowa: klasy 4-8
+  '4A', '4B', '4C',
+  '5A', '5B', '5C',
+  '6A', '6B', '6C',
+  '7A', '7B', '7C',
+  '8A', '8B', '8C',
+  // Szkoły ponadpodstawowe (Liceum i Technikum)
+  '1L', '2L', '3L', '4L',
+  '1T', '2T', '3T', '4T', '5T',
+];
+
 export const INITIAL_USERS: User[] = [
   {
     id: 'user_admin',
