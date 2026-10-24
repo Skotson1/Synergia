@@ -125,15 +125,31 @@ export interface Announcement {
   pinned?: boolean;
 }
 
+export type HomeworkType =
+  | 'sprawdzian'
+  | 'kartkowka'
+  | 'zadanie_domowe'
+  | 'projekt'
+  | 'wycieczka'
+  | 'wyjscie_klasowe'
+  | 'uroczystosc_apel'
+  | 'konkurs'
+  | 'wydarzenie'
+  | 'zebranie_rodzice'
+  | 'inne';
+
 export interface HomeworkTask {
   id: string;
   subjectName: string;
   title: string;
   description: string;
-  dueDate: string;
+  dueDate: string; // YYYY-MM-DD
+  lessonHour?: number; // 1-8 for specific lesson hour, undefined for all-day
+  lessonHourLabel?: string; // e.g. "Lekcja 3 (09:50 - 10:35)" or "Cały dzień"
   className: string;
   teacherName: string;
-  type: 'sprawdzian' | 'kartkowka' | 'zadanie_domowe' | 'projekt' | 'inne';
+  type: HomeworkType;
+  location?: string; // e.g. "Kino Muranów", "Sala 2", "Toruń"
 }
 
 export interface Student {
