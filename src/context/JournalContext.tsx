@@ -30,6 +30,7 @@ import {
   INITIAL_PLUS_MINUS,
   INITIAL_PASSWORD_RESET_REQUESTS,
 } from '../data/initialData';
+import { db, doc, getDoc, setDoc, onSnapshot } from '../utils/firebase';
 
 export interface BehaviorStats {
   basePoints: number;
@@ -291,26 +292,38 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // Sync current client state to server (debounced)
+  // Sync current client state to Google Cloud Firestore & backend (debounced)
   const syncToServer = React.useCallback(
     (customPayload?: any) => {
       if (!initialLoadedRef.current && !customPayload) return;
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(async () => {
+        const payload = customPayload || {
+          systemConfig,
+          users,
+          students,
+          grades,
+          attendance,
+          timetable,
+          messages,
+          announcements,
+          homework,
+          behaviorPoints,
+          lessonPlusMinus,
+          passwordResetRequests,
+          updatedAt: new Date().toISOString(),
+        };
+
+        // 1. Save directly to Google Cloud Firestore (instant cloud sync across all devices!)
         try {
-          const payload = customPayload || {
-            systemConfig,
-            users,
-            students,
-            grades,
-            attendance,
-            timetable,
-            messages,
-            announcements,
-            homework,
-            behaviorPoints,
-            lessonPlusMinus,
-            passwordResetRequests,
-          };
+          const schoolDocRef = doc(db, 'school_data', 'main');
+          await setDoc(schoolDocRef, payload, { merge: true });
+        } catch (fErr) {
+          console.warn('[Firestore sync error]', fErr);
+        }
+
+        // 2. Also notify local Express server if running
+        try {
           const res = await fetch('/api/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -325,7 +338,7 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
         } catch {
           // Offline fallback
         }
-      }, 350);
+      }, 300);
     },
     [
       systemConfig,
@@ -343,28 +356,28 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ]
   );
 
-  // Initial load from server on mount
+  // Real-time synchronization via Google Cloud Firestore
   useEffect(() => {
     let isCancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    const schoolDocRef = doc(db, 'school_data', 'main');
 
-    async function fetchServerState() {
-      try {
-        const res = await fetch('/api/state');
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data && !isCancelled) {
-            setIsServerConnected(true);
-            lastServerUpdateRef.current = json.data.updatedAt || '';
+    try {
+      unsubscribe = onSnapshot(
+        schoolDocRef,
+        (snapshot) => {
+          if (isCancelled) return;
+          setIsServerConnected(true);
 
-            // CASE A: Server already initialized by an admin on another or this device!
-            if (json.data.systemConfig && json.data.systemConfig.isInitialized) {
-              applyServerData(json.data);
-              initialLoadedRef.current = true;
-              setIsLoadingServerState(false);
-              return;
+          if (snapshot.exists()) {
+            const cloudData = snapshot.data();
+            if (cloudData && cloudData.systemConfig) {
+              lastServerUpdateRef.current = cloudData.updatedAt || '';
+              applyServerData(cloudData);
             }
-
-            // CASE B: Server is uninitialized, but client's local storage already has an initialized admin from earlier
+          } else {
+            // Document doesn't exist yet in Firestore
+            // Check if client has local cache from earlier to migrate to cloud
             const cachedConfig = loadStorage<SystemConfig>('systemConfig', DEFAULT_SYSTEM_CONFIG);
             if (cachedConfig && cachedConfig.isInitialized) {
               const cachedUsers = loadStorage<User[]>('users', []);
@@ -381,64 +394,44 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 behaviorPoints: loadStorage('behaviorPoints', []),
                 lessonPlusMinus: loadStorage('lessonPlusMinus', []),
                 passwordResetRequests: loadStorage('passwordResetRequests', []),
+                updatedAt: new Date().toISOString(),
               };
-              await fetch('/api/sync', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(syncPayload),
-              });
-              initialLoadedRef.current = true;
-              setIsLoadingServerState(false);
-              return;
+              setDoc(schoolDocRef, syncPayload).catch(() => {});
             }
-
-            // CASE C: Fresh uninitialized school for first device
-            initialLoadedRef.current = true;
-            setIsLoadingServerState(false);
-            return;
           }
+
+          initialLoadedRef.current = true;
+          setIsLoadingServerState(false);
+        },
+        (error) => {
+          console.warn('[Firestore listener error, using REST fallback]:', error);
+          // Fallback to fetch /api/state
+          fetch('/api/state')
+            .then(res => res.json())
+            .then(json => {
+              if (json.data && !isCancelled) {
+                applyServerData(json.data);
+              }
+            })
+            .catch(() => {})
+            .finally(() => {
+              if (!isCancelled) {
+                initialLoadedRef.current = true;
+                setIsLoadingServerState(false);
+              }
+            });
         }
-      } catch (err) {
-        console.warn('Could not contact /api/state backend, using local cache', err);
-      }
-
-      if (!isCancelled) {
-        setIsServerConnected(false);
-        initialLoadedRef.current = true;
-        setIsLoadingServerState(false);
-      }
+      );
+    } catch (e) {
+      console.warn('[Firestore subscription error]:', e);
+      initialLoadedRef.current = true;
+      setIsLoadingServerState(false);
     }
-
-    fetchServerState();
 
     return () => {
       isCancelled = true;
+      if (unsubscribe) unsubscribe();
     };
-  }, []);
-
-  // Background polling to keep all phones, laptops, and tablets in sync
-  useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      if (!initialLoadedRef.current) return;
-      try {
-        const res = await fetch('/api/state');
-        if (res.ok) {
-          const json = await res.json();
-          if (json.data) {
-            setIsServerConnected(true);
-            // If server state was updated elsewhere (e.g. admin created user or grade)
-            if (json.data.updatedAt && json.data.updatedAt !== lastServerUpdateRef.current) {
-              lastServerUpdateRef.current = json.data.updatedAt;
-              applyServerData(json.data);
-            }
-          }
-        }
-      } catch {
-        setIsServerConnected(false);
-      }
-    }, 4000);
-
-    return () => clearInterval(pollInterval);
   }, []);
 
   // Local storage save triggers & auto sync to server
@@ -511,14 +504,41 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [currentUser]);
 
   const resetSystemToInitialWizard = async () => {
+    const cleanPayload = {
+      systemConfig: { ...DEFAULT_SYSTEM_CONFIG, isInitialized: false },
+      users: [],
+      students: [],
+      grades: [],
+      attendance: [],
+      timetable: [],
+      messages: [],
+      announcements: [],
+      homework: [],
+      behaviorPoints: [],
+      lessonPlusMinus: [],
+      passwordResetRequests: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. Reset Firestore cloud database
+    try {
+      const schoolDocRef = doc(db, 'school_data', 'main');
+      await setDoc(schoolDocRef, cleanPayload);
+    } catch (err) {
+      console.warn('[Firestore reset error]', err);
+    }
+
+    // 2. Reset backend API
     try {
       await fetch('/api/reset', { method: 'POST' });
     } catch (err) {
       console.warn('Reset call failed:', err);
     }
+
     try {
       localStorage.clear();
     } catch {}
+
     setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, isInitialized: false });
     setCurrentUser(null);
     setUsers([]);
@@ -544,38 +564,23 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
     adminPassword?: string;
     includeDemoData?: boolean;
   }) => {
+    const schoolDocRef = doc(db, 'school_data', 'main');
+
+    // 1. Check if Firestore already has an initialized system from another device
     try {
-      const res = await fetch('/api/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-
-      if (res.status === 409) {
-        // System was ALREADY initialized on another device!
-        const json = await res.json();
-        if (json.data) {
-          applyServerData(json.data);
+      const snap = await getDoc(schoolDocRef);
+      if (snap.exists()) {
+        const cloudData = snap.data();
+        if (cloudData?.systemConfig?.isInitialized) {
+          alert('System został już skonfigurowany. Administrator może być utworzony tylko raz. Przełączono na ekran logowania.');
+          applyServerData(cloudData);
+          return;
         }
-        alert('System został już skonfigurowany. Administrator może być utworzony tylko raz. Przełączono na ekran logowania.');
-        return;
       }
-
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data) {
-          applyServerData(json.data);
-          if (json.adminUser) {
-            setCurrentUser(json.adminUser);
-          }
-        }
-        return;
-      }
-    } catch (err) {
-      console.warn('Backend /api/initialize unavailable, using local init:', err);
+    } catch (checkErr) {
+      console.warn('[Firestore check before init]:', checkErr);
     }
 
-    // Local fallback
     const newConfig: SystemConfig = {
       isInitialized: true,
       schoolName: config.schoolName.trim() || 'Moja Szkoła',
@@ -585,7 +590,6 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       adminName: config.adminName.trim() || 'Administrator',
       adminEmail: config.adminEmail.trim() || 'admin@szkola.edu.pl',
     };
-    setSystemConfig(newConfig);
 
     const adminUser: User = {
       id: 'user_admin_' + Date.now(),
@@ -598,25 +602,13 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
     };
 
-    if (config.includeDemoData) {
-      setUsers([adminUser, ...INITIAL_USERS.filter(u => u.role !== 'admin')]);
-      setStudents(INITIAL_STUDENTS);
-      setGrades(INITIAL_GRADES);
-      setAttendance(INITIAL_ATTENDANCE);
-      setTimetable(INITIAL_TIMETABLE);
-      setBehaviorPoints(INITIAL_BEHAVIOR_POINTS);
-      setLessonPlusMinus(INITIAL_PLUS_MINUS);
-    } else {
-      setUsers([adminUser]);
-      setStudents([]);
-      setGrades([]);
-      setAttendance([]);
-      setTimetable([]);
-      setBehaviorPoints([]);
-      setLessonPlusMinus([]);
-      setHomework([]);
-      setPasswordResetRequests([]);
-    }
+    const initialUsers = config.includeDemoData ? [adminUser, ...INITIAL_USERS.filter(u => u.role !== 'admin')] : [adminUser];
+    const initialStudents = config.includeDemoData ? INITIAL_STUDENTS : [];
+    const initialGrades = config.includeDemoData ? INITIAL_GRADES : [];
+    const initialAttendance = config.includeDemoData ? INITIAL_ATTENDANCE : [];
+    const initialTimetable = config.includeDemoData ? INITIAL_TIMETABLE : [];
+    const initialBehaviorPoints = config.includeDemoData ? INITIAL_BEHAVIOR_POINTS : [];
+    const initialLessonPlusMinus = config.includeDemoData ? INITIAL_PLUS_MINUS : [];
 
     const welcomeMsg: Message = {
       id: 'msg_welcome_' + Date.now(),
@@ -626,17 +618,16 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       recipientId: adminUser.id,
       recipientName: adminUser.name,
       subject: `Witaj w e-dzienniku szkoły ${newConfig.schoolName}!`,
-      content: `Dzień dobry ${adminUser.name}!\n\nTwój elektroniczny dziennik lekcyjny dla szkoły "${newConfig.schoolName}" został pomyślnie uruchomiony w centralnej bazie danych.\n\nKonto Administratora utworzono raz dla całej szkoły. Wszystkie inne urządzenia wyświetlają wyłącznie ekran logowania.\n\nŻyczymy owocnej pracy i wspaniałej zabawy z dziennikiem!`,
+      content: `Dzień dobry ${adminUser.name}!\n\nTwój elektroniczny dziennik lekcyjny dla szkoły "${newConfig.schoolName}" został pomyślnie uruchomiony w chmurze Google Firebase Firestore.\n\nKonto Administratora zostało utworzone JEDNORAZOWO dla całej placówki. Każde kolejne urządzenie (laptop brata, telefon, tablet) po otwarciu strony wyświetla wyłącznie ekran logowania.\n\nŻyczymy owocnej pracy i wspaniałej zabawy!`,
       date: new Date().toISOString().replace('T', ' ').slice(0, 16),
       isRead: false,
       isStarred: true,
     };
-    setMessages([welcomeMsg]);
 
     const welcomeAnn: Announcement = {
       id: 'ann_welcome_' + Date.now(),
       title: `Inauguracja Dziennika Elektronicznego · ${newConfig.schoolName}`,
-      content: `Witamy w roku szkolnym ${newConfig.academicYear}. Dziennik lekcyjny EduSynergia został pomyślnie skonfigurowany. Rejestracja publiczna jest wyłączona — wszystkimi kontami zarządza Administrator Placówki.`,
+      content: `Witamy w roku szkolnym ${newConfig.academicYear}. Dziennik lekcyjny EduSynergia został pomyślnie skonfigurowany w chmurze. Rejestracja publiczna jest wyłączona — wszystkimi kontami zarządza Administrator Placówki.`,
       authorName: adminUser.name,
       authorRole: 'Dyrektor Szkoły / Administrator',
       targetAudience: 'Wszyscy Użytkownicy',
@@ -644,8 +635,41 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       priority: 'important',
       pinned: true,
     };
-    setAnnouncements([welcomeAnn]);
 
+    const fullInitPayload = {
+      systemConfig: newConfig,
+      users: initialUsers,
+      students: initialStudents,
+      grades: initialGrades,
+      attendance: initialAttendance,
+      timetable: initialTimetable,
+      messages: [welcomeMsg],
+      announcements: [welcomeAnn],
+      homework: [],
+      behaviorPoints: initialBehaviorPoints,
+      lessonPlusMinus: initialLessonPlusMinus,
+      passwordResetRequests: [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 2. Save directly to Google Cloud Firestore
+    try {
+      await setDoc(schoolDocRef, fullInitPayload);
+    } catch (saveErr) {
+      console.warn('[Firestore init save error]', saveErr);
+    }
+
+    // 3. Also notify backend API if running
+    try {
+      await fetch('/api/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+    } catch {}
+
+    // 4. Apply locally
+    applyServerData(fullInitPayload);
     setCurrentUser(adminUser);
   };
 

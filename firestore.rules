@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // School system configuration and initialization status
+    match /system/{document=**} {
+      allow read, write: if true;
+    }
+
+    // Main school journal state (users, grades, attendance, timetable, messages)
+    match /school_data/{document=**} {
+      allow read, write: if true;
+    }
+
+    // Connection validation
+    match /test/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

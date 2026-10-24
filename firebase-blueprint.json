@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Global school configuration and initialization state",
+      "type": "object",
+      "properties": {
+        "isInitialized": { "type": "boolean" },
+        "schoolName": { "type": "string" },
+        "schoolCity": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "semester": { "type": "number" },
+        "adminName": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "initializedAt": { "type": "string" }
+      },
+      "required": ["isInitialized", "schoolName"]
+    },
+    "JournalState": {
+      "title": "JournalState",
+      "description": "Entire synchronized state of the school journal for all devices",
+      "type": "object",
+      "properties": {
+        "systemConfig": { "type": "object" },
+        "users": { "type": "array" },
+        "students": { "type": "array" },
+        "grades": { "type": "array" },
+        "attendance": { "type": "array" },
+        "timetable": { "type": "array" },
+        "messages": { "type": "array" },
+        "announcements": { "type": "array" },
+        "homework": { "type": "array" },
+        "behaviorPoints": { "type": "array" },
+        "lessonPlusMinus": { "type": "array" },
+        "passwordResetRequests": { "type": "array" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["systemConfig", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/system/config": {
+      "schema": "SystemConfig",
+      "description": "Holds the single source of truth for school initialization and global configuration"
+    },
+    "/school_data/main": {
+      "schema": "JournalState",
+      "description": "Holds synchronized database of users, timetable, grades, and attendance accessible by all school devices"
+    }
+  }
+}
