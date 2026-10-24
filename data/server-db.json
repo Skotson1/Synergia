@@ -1,0 +1,23 @@
+{
+  "systemConfig": {
+    "isInitialized": false,
+    "schoolName": "",
+    "schoolCity": "",
+    "academicYear": "2025/2026",
+    "semester": 2,
+    "adminName": "",
+    "adminEmail": ""
+  },
+  "users": [],
+  "students": [],
+  "grades": [],
+  "attendance": [],
+  "timetable": [],
+  "messages": [],
+  "announcements": [],
+  "homework": [],
+  "behaviorPoints": [],
+  "lessonPlusMinus": [],
+  "passwordResetRequests": [],
+  "updatedAt": "2026-10-24T14:57:44.611Z"
+}
