@@ -72,7 +72,8 @@ function JournalApp() {
           />
         )}
         {activeTab === 'grades' && <GradesView />}
-        {activeTab === 'attendance' && <AttendanceView />}
+        {activeTab === 'rollcall' && <AttendanceView initialTab="rollcall" />}
+        {activeTab === 'attendance' && <AttendanceView initialTab="grid" />}
         {activeTab === 'behavior' && <BehaviorView />}
         {activeTab === 'timetable' && <TimetableView />}
         {activeTab === 'schedule' && <TerminarzView />}

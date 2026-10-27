@@ -243,7 +243,25 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const lastServerUpdateRef = React.useRef<string>('');
   const syncTimeoutRef = React.useRef<any>(null);
 
-  // Helper to apply full state from server
+  // Smart merge helper ensuring newly created users are never wiped by older snapshots
+  const mergeListsById = <T extends { id: string }>(serverList: T[], localList: T[], deletedIds: string[] = []): T[] => {
+    const map = new Map<string, T>();
+    // First, insert server items
+    for (const item of serverList) {
+      if (item && item.id && !deletedIds.includes(item.id)) {
+        map.set(item.id, item);
+      }
+    }
+    // Then, insert local items not present in server (e.g. newly created before server sync or during transition)
+    for (const item of localList) {
+      if (item && item.id && !deletedIds.includes(item.id) && !map.has(item.id)) {
+        map.set(item.id, item);
+      }
+    }
+    return Array.from(map.values());
+  };
+
+  // Helper to apply full state from server with smart conflict resolution
   const applyServerData = (data: any) => {
     if (!data) return;
     if (data.systemConfig) {
@@ -251,12 +269,22 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       saveStorage('systemConfig', data.systemConfig);
     }
     if (Array.isArray(data.users)) {
-      setUsers(data.users);
-      saveStorage('users', data.users);
+      const deletedIds = loadStorage<string[]>('deletedUserIds', []);
+      const localUsers = loadStorage<User[]>('users', []);
+      const mergedUsers = mergeListsById(data.users, localUsers, deletedIds);
+      setUsers(mergedUsers);
+      saveStorage('users', mergedUsers);
+
+      // If we recovered local users that server didn't have yet, queue an immediate sync back
+      if (mergedUsers.length > data.users.length) {
+        setTimeout(() => syncToServer({ users: mergedUsers }), 100);
+      }
     }
     if (Array.isArray(data.students)) {
-      setStudents(data.students);
-      saveStorage('students', data.students);
+      const localStudents = loadStorage<Student[]>('students', []);
+      const mergedStudents = mergeListsById(data.students, localStudents, []);
+      setStudents(mergedStudents);
+      saveStorage('students', mergedStudents);
     }
     if (Array.isArray(data.grades)) {
       setGrades(data.grades);
@@ -294,6 +322,47 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setPasswordResetRequests(data.passwordResetRequests);
       saveStorage('passwordResetRequests', data.passwordResetRequests);
     }
+  };
+
+  // Immediate sync helper to cloud & local server without waiting for debounce
+  const pushDirectSync = async (partialPayload: Record<string, any>) => {
+    const cachedUsers = loadStorage<User[]>('users', users);
+    const cachedStudents = loadStorage<Student[]>('students', students);
+    const deletedUserIds = loadStorage<string[]>('deletedUserIds', []);
+    const fullPayload = {
+      systemConfig,
+      users: partialPayload.users || cachedUsers,
+      students: partialPayload.students || cachedStudents,
+      deletedUserIds,
+      grades: partialPayload.grades || grades,
+      attendance: partialPayload.attendance || attendance,
+      timetable: partialPayload.timetable || timetable,
+      messages: partialPayload.messages || messages,
+      announcements: partialPayload.announcements || announcements,
+      homework: partialPayload.homework || homework,
+      behaviorPoints: partialPayload.behaviorPoints || behaviorPoints,
+      lessonPlusMinus: partialPayload.lessonPlusMinus || lessonPlusMinus,
+      passwordResetRequests: partialPayload.passwordResetRequests || passwordResetRequests,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. Google Cloud Firestore
+    try {
+      const schoolDocRef = doc(db, 'school_data', 'main');
+      await setDoc(schoolDocRef, fullPayload, { merge: true });
+    } catch (err) {
+      console.warn('[Direct Firestore sync error]:', err);
+    }
+
+    // 2. Express server disk database (with keepalive)
+    try {
+      await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullPayload),
+        keepalive: true,
+      });
+    } catch {}
   };
 
   // Sync current client state to server (debounced)
@@ -770,19 +839,99 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
         : 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
     };
 
-    setUsers(prev => [newUser, ...prev]);
+    const nextUsers = [newUser, ...users];
+    setUsers(nextUsers);
+    saveStorage('users', nextUsers);
+
+    // If new student was added, persist student state immediately too
+    let nextStudents = students;
+    if (params.role === 'student') {
+      const names = params.name.trim().split(' ');
+      const lastName = names.slice(1).join(' ') || 'Nowy';
+      const createdStudent: Student = {
+        id: studentId || ('st_' + Date.now()),
+        firstName: names[0] || 'Uczeń',
+        lastName,
+        className: params.className || '4A',
+        numberInJournal: students.length + 1,
+        pesel: params.pesel || ('08' + Math.floor(100000000 + Math.random() * 900000000)),
+        parentName: params.parentName || `Rodzic (${lastName})`,
+        parentEmail: params.parentEmail || `${lastName.toLowerCase()}@rodzic.szkola.edu.pl`,
+      };
+      nextStudents = [...students, createdStudent];
+      setStudents(nextStudents);
+      saveStorage('students', nextStudents);
+    }
+
+    // 1. Direct atomic persistence calls to server (guaranteed to survive exit/reload)
+    try {
+      fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+
+    if (params.role === 'student' && nextStudents.length > students.length) {
+      const createdStudent = nextStudents[nextStudents.length - 1];
+      try {
+        fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createdStudent),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
+    }
+
+    // 2. Direct, non-debounced push to cloud Firestore and full server snapshot
+    pushDirectSync({ users: nextUsers, students: nextStudents });
+
     return newUser;
   };
 
   const updateUserByAdmin = (id: string, updated: Partial<User>) => {
-    setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...updated } : u)));
+    const updatedUsers = users.map(u => (u.id === id ? { ...u, ...updated } : u));
+    setUsers(updatedUsers);
+    saveStorage('users', updatedUsers);
     if (currentUser?.id === id) {
       setCurrentUser(prev => prev ? { ...prev, ...updated } : null);
     }
+    const targetUser = updatedUsers.find(u => u.id === id);
+    if (targetUser) {
+      try {
+        fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(targetUser),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
+    }
+    pushDirectSync({ users: updatedUsers });
   };
 
   const deleteUserByAdmin = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+    const remainingUsers = users.filter(u => u.id !== id);
+    setUsers(remainingUsers);
+    saveStorage('users', remainingUsers);
+
+    // Track explicitly deleted user ID so smart merge doesn't re-add it
+    const deletedIds = loadStorage<string[]>('deletedUserIds', []);
+    if (!deletedIds.includes(id)) {
+      deletedIds.push(id);
+      saveStorage('deletedUserIds', deletedIds);
+    }
+
+    try {
+      fetch(`/api/users/${id}`, {
+        method: 'DELETE',
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+
+    pushDirectSync({ users: remainingUsers, deletedUserIds: deletedIds });
   };
 
   const resetSystem = () => {
@@ -1094,14 +1243,15 @@ export const JournalProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const replaceTimetableForClass = (className: string, newLessons: Omit<TimetableLesson, 'id'>[]) => {
-    setTimetable(prev => {
-      const otherClasses = prev.filter(l => l.className !== className);
-      const generated: TimetableLesson[] = newLessons.map((l, idx) => ({
-        ...l,
-        id: 'tt_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
-      }));
-      return [...otherClasses, ...generated];
-    });
+    const otherClasses = timetable.filter(l => l.className !== className);
+    const generated: TimetableLesson[] = newLessons.map((l, idx) => ({
+      ...l,
+      id: 'tt_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+    }));
+    const nextTimetable = [...otherClasses, ...generated];
+    setTimetable(nextTimetable);
+    saveStorage('timetable', nextTimetable);
+    pushDirectSync({ timetable: nextTimetable });
   };
 
   // Messages

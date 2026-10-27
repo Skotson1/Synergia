@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useJournal } from '../context/JournalContext';
 import { AttendanceRecord, AttendanceStatus, Student } from '../types';
-import { LESSON_BELLS } from '../data/initialData';
+import { LESSON_BELLS, ALL_SCHOOL_CLASSES } from '../data/initialData';
 import {
   Clock,
   CheckCircle,
@@ -24,12 +24,17 @@ import {
   ClipboardList,
 } from 'lucide-react';
 
-export const AttendanceView: React.FC = () => {
+interface AttendanceViewProps {
+  initialTab?: 'rollcall' | 'grid' | 'absences' | 'excuses';
+}
+
+export const AttendanceView: React.FC<AttendanceViewProps> = ({ initialTab }) => {
   const {
     currentUser,
     students,
     subjects,
     attendance,
+    timetable,
     requestExcuse,
     respondToExcuse,
     getAttendanceStats,
@@ -38,6 +43,15 @@ export const AttendanceView: React.FC = () => {
 
   const isStudentOrParent = currentUser?.role === 'student' || currentUser?.role === 'parent';
   const isTeacherOrAdmin = currentUser?.role === 'admin' || currentUser?.role === 'teacher';
+
+  // Available classes across all data sources
+  const availableClasses: string[] = Array.from(
+    new Set([
+      ...students.map(s => s.className).filter(Boolean),
+      ...timetable.map(t => t.className).filter(Boolean),
+      ...ALL_SCHOOL_CLASSES,
+    ])
+  );
 
   // Active student selection (strictly locked if student/parent)
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
@@ -50,7 +64,10 @@ export const AttendanceView: React.FC = () => {
   const activeStudentId = isStudentOrParent && currentUser?.studentId ? currentUser.studentId : selectedStudentId;
   const currentStudent = students.find(s => s.id === activeStudentId) || students[0];
 
-  const [activeTab, setActiveTab] = useState<'rollcall' | 'grid' | 'absences' | 'excuses'>('rollcall');
+  const [activeTab, setActiveTab] = useState<'rollcall' | 'grid' | 'absences' | 'excuses'>(() => {
+    if (initialTab) return initialTab;
+    return isStudentOrParent ? 'grid' : 'rollcall';
+  });
   const [excuseModalOpen, setExcuseModalOpen] = useState(false);
   const [selectedRecordForExcuse, setSelectedRecordForExcuse] = useState<AttendanceRecord | null>(null);
   const [excuseReasonText, setExcuseReasonText] = useState('');
@@ -58,7 +75,10 @@ export const AttendanceView: React.FC = () => {
 
   // --- ROLL CALL / LEKCYJNA LISTA OBECNOŚCI STATE ---
   const [rollCallDate, setRollCallDate] = useState<string>('2026-04-10');
-  const [rollCallClass, setRollCallClass] = useState<string>(() => students[0]?.className || 'Klasa 4');
+  const [rollCallClass, setRollCallClass] = useState<string>(() => {
+    if (students.length > 0) return students[0].className;
+    return '4A';
+  });
   const [rollCallHour, setRollCallHour] = useState<number>(1);
   const [rollCallSubject, setRollCallSubject] = useState<string>('Matematyka');
   const [rollCallLessonTopic, setRollCallLessonTopic] = useState<string>('Rachunek prawdopodobieństwa - własności miary probabilistycznej');
@@ -258,17 +278,19 @@ export const AttendanceView: React.FC = () => {
 
           {/* Segmented Tab Bar */}
           <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold">
-            <button
-              onClick={() => setActiveTab('rollcall')}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 ${
-                activeTab === 'rollcall'
-                  ? 'bg-white text-[#0b192c] shadow-xs font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ClipboardList className="w-3.5 h-3.5 text-amber-500" />
-              <span>Lista Obecności (Lekcyjna)</span>
-            </button>
+            {isTeacherOrAdmin && (
+              <button
+                onClick={() => setActiveTab('rollcall')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 ${
+                  activeTab === 'rollcall'
+                    ? 'bg-white text-[#0b192c] shadow-xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ClipboardList className="w-3.5 h-3.5 text-amber-500" />
+                <span>Lista Obecności (Lekcyjna)</span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('grid')}
               className={`px-3 py-1.5 rounded-lg transition-all ${
@@ -403,9 +425,14 @@ export const AttendanceView: React.FC = () => {
                   onChange={e => handleRollCallConfigChange(rollCallDate, rollCallHour, e.target.value, rollCallSubject)}
                   className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
-                  <option value="3A">Klasa 3A (Mat-Fiz-Inf)</option>
-                  <option value="3B">Klasa 3B (Bio-Chem)</option>
-                  <option value="2A">Klasa 2A (Humanistyczna)</option>
+                  {availableClasses.map(cls => {
+                    const count = students.filter(s => s.className === cls).length;
+                    return (
+                      <option key={cls} value={cls}>
+                        Klasa {cls} {count > 0 ? `(${count} os.)` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -470,147 +497,177 @@ export const AttendanceView: React.FC = () => {
             </div>
           </div>
 
-          {/* Table of students */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 uppercase tracking-wider text-[10px] font-bold">
-                  <th className="py-2.5 px-3 w-12 text-center">Nr</th>
-                  <th className="py-2.5 px-4">Uczeń (Imię i Nazwisko)</th>
-                  <th className="py-2.5 px-4 min-w-[340px]">Status Obecności</th>
-                  <th className="py-2.5 px-4">Notatka / Minuty</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {classStudents.map(student => {
-                  const studentState = studentRollCallState[student.id] || { status: 'obecny', note: '' };
-                  const currentStatus = studentState.status;
+          {/* Table of students or empty state */}
+          {classStudents.length === 0 ? (
+            <div className="p-8 text-center bg-slate-50 border-t border-slate-200">
+              <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <div className="font-bold text-xs text-slate-800">
+                Brak zarejestrowanych uczniów w klasie {rollCallClass}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-sm mx-auto">
+                Wybierz inny oddział z listy powyżej lub dodaj uczniów do tej klasy w Panelu Dyrekcji.
+              </p>
+              {students.length > 0 && (
+                <div className="mt-4 flex flex-wrap justify-center items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-500">Przełącz na klasę z uczniami:</span>
+                  {Array.from(new Set(students.map(s => s.className))).map(c => {
+                    const cCount = students.filter(s => s.className === c).length;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => handleRollCallConfigChange(rollCallDate, rollCallHour, c, rollCallSubject)}
+                        className="px-3 py-1 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-400 text-blue-900 rounded-xl text-xs font-bold transition-all shadow-2xs"
+                      >
+                        Klasa {c} ({cCount} os.)
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 uppercase tracking-wider text-[10px] font-bold">
+                    <th className="py-2.5 px-3 w-12 text-center">Nr</th>
+                    <th className="py-2.5 px-4">Uczeń (Imię i Nazwisko)</th>
+                    <th className="py-2.5 px-4 min-w-[340px]">Status Obecności</th>
+                    <th className="py-2.5 px-4">Notatka / Minuty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {classStudents.map(student => {
+                    const studentState = studentRollCallState[student.id] || { status: 'obecny', note: '' };
+                    const currentStatus = studentState.status;
 
-                  return (
-                    <tr
-                      key={student.id}
-                      className={`hover:bg-slate-50/70 transition-colors ${
-                        student.id === activeStudentId ? 'bg-blue-50/40' : ''
-                      }`}
-                    >
-                      <td className="py-3 px-3 text-center font-bold text-slate-500">
-                        {student.numberInJournal}
-                      </td>
+                    return (
+                      <tr
+                        key={student.id}
+                        className={`hover:bg-slate-50/70 transition-colors ${
+                          student.id === activeStudentId ? 'bg-blue-50/40' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-3 text-center font-bold text-slate-500">
+                          {student.numberInJournal}
+                        </td>
 
-                      <td className="py-3 px-4 font-bold text-slate-900">
-                        <div className="flex items-center space-x-2">
-                          <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px]">
-                            {student.firstName[0]}{student.lastName[0]}
-                          </span>
-                          <span>{student.lastName} {student.firstName}</span>
-                        </div>
-                      </td>
+                        <td className="py-3 px-4 font-bold text-slate-900">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px]">
+                              {student.firstName[0]}{student.lastName[0]}
+                            </span>
+                            <span>{student.lastName} {student.firstName}</span>
+                          </div>
+                        </td>
 
-                      {/* Status selectors */}
-                      <td className="py-3 px-4">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {/* Obecny */}
-                          <button
-                            type="button"
-                            disabled={!isTeacherOrAdmin}
-                            onClick={() => handleSetStudentStatus(student.id, 'obecny')}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                              currentStatus === 'obecny'
-                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                                : 'bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border-slate-200'
-                            }`}
-                          >
-                            ● OB
-                          </button>
+                        {/* Status selectors */}
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {/* Obecny */}
+                            <button
+                              type="button"
+                              disabled={!isTeacherOrAdmin}
+                              onClick={() => handleSetStudentStatus(student.id, 'obecny')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                currentStatus === 'obecny'
+                                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border-slate-200'
+                              }`}
+                            >
+                              ● OB
+                            </button>
 
-                          {/* Nieobecny */}
-                          <button
-                            type="button"
-                            disabled={!isTeacherOrAdmin}
-                            onClick={() => handleSetStudentStatus(student.id, 'nieobecny')}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                              currentStatus === 'nieobecny'
-                                ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
-                                : 'bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border-slate-200'
-                            }`}
-                          >
-                            ✕ NB
-                          </button>
+                            {/* Nieobecny */}
+                            <button
+                              type="button"
+                              disabled={!isTeacherOrAdmin}
+                              onClick={() => handleSetStudentStatus(student.id, 'nieobecny')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                currentStatus === 'nieobecny'
+                                  ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border-slate-200'
+                              }`}
+                            >
+                              ✕ NB
+                            </button>
 
-                          {/* Spóźniony */}
-                          <button
-                            type="button"
-                            disabled={!isTeacherOrAdmin}
-                            onClick={() => handleSetStudentStatus(student.id, 'spozniony')}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                              currentStatus === 'spozniony'
-                                ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
-                                : 'bg-slate-50 hover:bg-amber-50 text-slate-600 hover:text-amber-700 border-slate-200'
-                            }`}
-                          >
-                            🕒 SP
-                          </button>
+                            {/* Spóźniony */}
+                            <button
+                              type="button"
+                              disabled={!isTeacherOrAdmin}
+                              onClick={() => handleSetStudentStatus(student.id, 'spozniony')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                currentStatus === 'spozniony'
+                                  ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-amber-50 text-slate-600 hover:text-amber-700 border-slate-200'
+                              }`}
+                            >
+                              🕒 SP
+                            </button>
 
-                          {/* Usprawiedliwiony */}
-                          <button
-                            type="button"
-                            disabled={!isTeacherOrAdmin}
-                            onClick={() => handleSetStudentStatus(student.id, 'usprawiedliwiony')}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                              currentStatus === 'usprawiedliwiony'
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                : 'bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border-slate-200'
-                            }`}
-                          >
-                            ✓ US
-                          </button>
+                            {/* Usprawiedliwiony */}
+                            <button
+                              type="button"
+                              disabled={!isTeacherOrAdmin}
+                              onClick={() => handleSetStudentStatus(student.id, 'usprawiedliwiony')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                currentStatus === 'usprawiedliwiony'
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border-slate-200'
+                              }`}
+                            >
+                              ✓ US
+                            </button>
 
-                          {/* Zwolniony */}
-                          <button
-                            type="button"
-                            disabled={!isTeacherOrAdmin}
-                            onClick={() => handleSetStudentStatus(student.id, 'zwolniony')}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                              currentStatus === 'zwolniony'
-                                ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
-                                : 'bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border-slate-200'
-                            }`}
-                          >
-                            🚪 ZW
-                          </button>
-                        </div>
-                      </td>
+                            {/* Zwolniony */}
+                            <button
+                              type="button"
+                              disabled={!isTeacherOrAdmin}
+                              onClick={() => handleSetStudentStatus(student.id, 'zwolniony')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                                currentStatus === 'zwolniony'
+                                  ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border-slate-200'
+                              }`}
+                            >
+                              🚪 ZW
+                            </button>
+                          </div>
+                        </td>
 
-                      {/* Notes / Minutes input */}
-                      <td className="py-3 px-4">
-                        {isTeacherOrAdmin ? (
-                          <input
-                            type="text"
-                            value={studentState.note}
-                            onChange={e =>
-                              setStudentRollCallState(prev => ({
-                                ...prev,
-                                [student.id]: {
-                                  ...prev[student.id],
-                                  note: e.target.value,
-                                },
-                              }))
-                            }
-                            placeholder="np. spóźnienie 10 min..."
-                            className="w-full text-xs px-2.5 py-1 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="text-xs text-slate-500">
-                            {studentState.note || '—'}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        {/* Notes / Minutes input */}
+                        <td className="py-3 px-4">
+                          {isTeacherOrAdmin ? (
+                            <input
+                              type="text"
+                              value={studentState.note}
+                              onChange={e =>
+                                setStudentRollCallState(prev => ({
+                                  ...prev,
+                                  [student.id]: {
+                                    ...prev[student.id],
+                                    note: e.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="np. spóźnienie 10 min..."
+                              className="w-full text-xs px-2.5 py-1 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="text-xs text-slate-500">
+                              {studentState.note || '—'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

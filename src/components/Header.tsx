@@ -18,11 +18,13 @@ import {
   RotateCcw,
   Award,
   Sparkles,
+  ClipboardList,
 } from 'lucide-react';
 
 export type ActiveTab =
   | 'dashboard'
   | 'grades'
+  | 'rollcall'
   | 'attendance'
   | 'behavior'
   | 'timetable'
@@ -47,7 +49,20 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, onOpenL
   const navItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'dashboard', label: 'Biurko', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'grades', label: 'Oceny', icon: <GraduationCap className="w-4 h-4" /> },
-    { id: 'attendance', label: 'Frekwencja & Lista', icon: <Clock className="w-4 h-4" /> },
+    ...(isTeacherOrAdmin
+      ? [
+          {
+            id: 'rollcall' as ActiveTab,
+            label: 'Lista obecności',
+            icon: <ClipboardList className="w-4 h-4 text-amber-300" />,
+          },
+        ]
+      : []),
+    {
+      id: 'attendance',
+      label: 'Frekwencja',
+      icon: <Clock className="w-4 h-4" />,
+    },
     { id: 'behavior', label: 'Punkty & Zachowanie', icon: <Award className="w-4 h-4 text-amber-300" /> },
     { id: 'timetable', label: 'Plan lekcji', icon: <Calendar className="w-4 h-4" /> },
     { id: 'schedule', label: 'Terminarz', icon: <FileText className="w-4 h-4" /> },

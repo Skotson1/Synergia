@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useJournal } from '../context/JournalContext';
-import { TimetableLesson } from '../types';
 import { LESSON_BELLS, ALL_SCHOOL_CLASSES } from '../data/initialData';
+import { generateClassTimetable, getCurriculumGroup } from '../utils/timetableGenerator';
 import {
   Calendar,
   Clock,
@@ -100,271 +100,41 @@ export const TimetableView: React.FC = () => {
     setNewSubNote('');
   };
 
-  // Realistic, organic, mixed schedule generator strictly utilizing rooms 1-4 with varied day lengths & staggered hours
-  const handleQuickSeedPlan = () => {
-    if (classLessons.length > 0) {
+  const [shuffleIndex, setShuffleIndex] = useState(0);
+
+  // Dynamic, curriculum-accurate, organic timetable generator strictly utilizing rooms 1-4
+  const handleQuickSeedPlan = (forceShuffle: boolean = false) => {
+    if (classLessons.length > 0 && !forceShuffle) {
       const ok = window.confirm(
-        `Dla klasy ${selectedClass} istnieje już ${classLessons.length} lekcji. Czy chcesz je zastąpić nowym, realistycznym i zróżnicowanym planem zajęć (sale 1-4)?`
+        `Dla klasy ${selectedClass} istnieje już ${classLessons.length} lekcji. Czy chcesz wygenerować nowy plan lekcji (sale 1-4) dostosowany do poziomu tej klasy?`
       );
       if (!ok) return;
     }
 
-    const realisticScheduleSeed: Array<{
-      day: 1 | 2 | 3 | 4 | 5;
-      hour: number;
-      subject: string;
-      room: 'Sala 1' | 'Sala 2' | 'Sala 3' | 'Sala 4';
-      teacher: string;
-      topic: string;
-    }> = [
-      // === PONIEDZIAŁEK (6 lekcji: godz. 1 - 6, 08:00 - 13:30) ===
-      {
-        day: 1,
-        hour: 1,
-        subject: 'Język polski',
-        room: 'Sala 1',
-        teacher: 'mgr Anna Nowak',
-        topic: "Analiza noweli 'Katarynka' Bolesława Prusa i motyw empatii",
-      },
-      {
-        day: 1,
-        hour: 2,
-        subject: 'Matematyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Działania na ułamkach zwykłych i sprowadzanie do wspólnego mianownika',
-      },
-      {
-        day: 1,
-        hour: 3,
-        subject: 'Język angielski',
-        room: 'Sala 3',
-        teacher: 'mgr John Miller',
-        topic: 'Unit 4: Daily routines & Present Simple in practice',
-      },
-      {
-        day: 1,
-        hour: 4,
-        subject: 'Historia',
-        room: 'Sala 1',
-        teacher: 'mgr Piotr Adamski',
-        topic: 'Polska pierwszych Piastów - chrzest Polski i rządy Mieszka I',
-      },
-      {
-        day: 1,
-        hour: 5,
-        subject: 'Przyroda',
-        room: 'Sala 4',
-        teacher: 'mgr Katarzyna Wróbel',
-        topic: 'Strefy krajobrazowe Ziemi: fauna i flora lasów strefy umiarkowanej',
-      },
-      {
-        day: 1,
-        hour: 6,
-        subject: 'Godzina z wychowawcą',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Bezpieczeństwo w internecie i zasady wzajemnego szacunku w klasie',
-      },
+    const nextShuffle = forceShuffle ? shuffleIndex + 1 : shuffleIndex;
+    if (forceShuffle) {
+      setShuffleIndex(nextShuffle);
+    }
 
-      // === WTOREK (5 lekcji: przesunięty start o godz. 2! lekcje godz. 2 - 6, 08:55 - 13:30) ===
-      {
-        day: 2,
-        hour: 2,
-        subject: 'Wychowanie fizyczne',
-        room: 'Sala 4',
-        teacher: 'mgr Grzegorz Bąk',
-        topic: 'Gry zespołowe: technika kozłowania i podania oburącz w koszykówce',
-      },
-      {
-        day: 2,
-        hour: 3,
-        subject: 'Matematyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Kolejność wykonywania działań oraz rozwiązywanie zadań z nawiasami',
-      },
-      {
-        day: 2,
-        hour: 4,
-        subject: 'Język polski',
-        room: 'Sala 1',
-        teacher: 'mgr Anna Nowak',
-        topic: 'Części mowy - utrwalenie wiadomości o czasowniku i przymiotniku',
-      },
-      {
-        day: 2,
-        hour: 5,
-        subject: 'Informatyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Algorytmy blokowe i sterowanie postacią w środowisku Scratch',
-      },
-      {
-        day: 2,
-        hour: 6,
-        subject: 'Język angielski',
-        room: 'Sala 3',
-        teacher: 'mgr John Miller',
-        topic: 'Vocabulary practice: Means of transport and holiday directions',
-      },
-
-      // === ŚRODA (7 lekcji: najdłuższy, intensywny dzień, godz. 1 - 7, 08:00 - 14:25) ===
-      {
-        day: 3,
-        hour: 1,
-        subject: 'Matematyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Figury geometryczne - obliczanie obwodów prostokątów i wielokątów',
-      },
-      {
-        day: 3,
-        hour: 2,
-        subject: 'Język polski',
-        room: 'Sala 1',
-        teacher: 'mgr Anna Nowak',
-        topic: 'Sztuka redagowania opisu postaci z lektury szkolnej',
-      },
-      {
-        day: 3,
-        hour: 3,
-        subject: 'Biologia i Przyroda',
-        room: 'Sala 4',
-        teacher: 'mgr Katarzyna Wróbel',
-        topic: 'Budowa komórki pod mikroskopem biologicznym - obserwacja aparatów szparkowych',
-      },
-      {
-        day: 3,
-        hour: 4,
-        subject: 'Geografia',
-        room: 'Sala 4',
-        teacher: 'mgr Katarzyna Wróbel',
-        topic: 'Ukształtowanie terenu Polski - praca z mapą hipsometryczną',
-      },
-      {
-        day: 3,
-        hour: 5,
-        subject: 'Plastyka',
-        room: 'Sala 1',
-        teacher: 'mgr Monika Wiśniewska',
-        topic: 'Perspektywa zbieżna i kompozycja otwarta w pejzażu jesiennym',
-      },
-      {
-        day: 3,
-        hour: 6,
-        subject: 'Wychowanie fizyczne',
-        room: 'Sala 4',
-        teacher: 'mgr Grzegorz Bąk',
-        topic: 'Ćwiczenia gimnastyczne i zwinnościowy tor przeszkód na sali gimnastycznej',
-      },
-      {
-        day: 3,
-        hour: 7,
-        subject: 'Język niemiecki',
-        room: 'Sala 3',
-        teacher: 'mgr John Miller',
-        topic: 'Podstawowe zwroty grzecznościowe, powitania i przedstawianie się',
-      },
-
-      // === CZWARTEK (5 lekcji: godz. 1 - 5, 08:00 - 12:35) ===
-      {
-        day: 4,
-        hour: 1,
-        subject: 'Historia',
-        room: 'Sala 1',
-        teacher: 'mgr Piotr Adamski',
-        topic: 'Życie codzienne w średniowiecznym grodzie i obyczaje rycerskie',
-      },
-      {
-        day: 4,
-        hour: 2,
-        subject: 'Język angielski',
-        room: 'Sala 3',
-        teacher: 'mgr John Miller',
-        topic: 'Reading comprehension: Famous inventors and their world discoveries',
-      },
-      {
-        day: 4,
-        hour: 3,
-        subject: 'Matematyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Pola powierzchni prostokątów i kwadratów - zadania z treścią',
-      },
-      {
-        day: 4,
-        hour: 4,
-        subject: 'Muzyka',
-        room: 'Sala 3',
-        teacher: 'mgr Monika Wiśniewska',
-        topic: 'Polskie tańce narodowe - rytm poloneza i mazura w muzyce Fryderyka Chopina',
-      },
-      {
-        day: 4,
-        hour: 5,
-        subject: 'Język polski',
-        room: 'Sala 1',
-        teacher: 'mgr Anna Nowak',
-        topic: 'Zasady pisowni wyrazów z „nie” łącznie i rozdzielnie',
-      },
-
-      // === PIĄTEK (4 lekcje: krótki piątek, wczesny powrót, godz. 1 - 4, 08:00 - 11:35) ===
-      {
-        day: 5,
-        hour: 1,
-        subject: 'Wychowanie fizyczne',
-        room: 'Sala 4',
-        teacher: 'mgr Grzegorz Bąk',
-        topic: 'Mecz szkolny piłki siatkowej - technika odbić i zagrywki dolnej',
-      },
-      {
-        day: 5,
-        hour: 2,
-        subject: 'Przyroda',
-        room: 'Sala 4',
-        teacher: 'mgr Katarzyna Wróbel',
-        topic: 'Doświadczenia z wodą: zjawisko parowania, skraplania i filtracji cieczy',
-      },
-      {
-        day: 5,
-        hour: 3,
-        subject: 'Informatyka',
-        room: 'Sala 2',
-        teacher: 'mgr Tomasz Kowalczyk',
-        topic: 'Wyszukiwanie rzetelnych informacji w sieci i przygotowanie prezentacji',
-      },
-      {
-        day: 5,
-        hour: 4,
-        subject: 'Język polski',
-        room: 'Sala 1',
-        teacher: 'mgr Anna Nowak',
-        topic: 'Krótka forma wypowiedzi - tworzenie zwięzłego zaproszenia i ogłoszenia',
-      },
-    ];
-
-    const lessonsToInsert: Omit<TimetableLesson, 'id'>[] = realisticScheduleSeed.map(item => {
-      const bell = LESSON_BELLS.find(b => b.hour === item.hour) || LESSON_BELLS[item.hour - 1];
-      return {
-        dayOfWeek: item.day,
-        lessonHour: item.hour,
-        timeStart: bell.start,
-        timeEnd: bell.end,
-        subjectName: item.subject,
-        classroom: item.room,
-        teacherName: item.teacher,
-        className: selectedClass,
-        groupName: 'cała klasa',
-        lessonTopic: item.topic,
-      };
-    });
-
+    const lessonsToInsert = generateClassTimetable(selectedClass, nextShuffle);
     replaceTimetableForClass(selectedClass, lessonsToInsert);
+
+    const currGroup = getCurriculumGroup(selectedClass);
+    let groupDescription = '';
+    if (currGroup === 'early') {
+      groupDescription = 'Edukacja wczesnoszkolna (kl. 1-3) · Sale 1-4';
+    } else if (currGroup === 'senior') {
+      groupDescription = 'Klasy 7-8 · Chemia, Fizyka, Biologia, Język niemiecki, EDB i WOS · Sale 1-4';
+    } else if (currGroup === 'high') {
+      groupDescription = 'Szkoła ponadpodstawowa · Sale 1-4';
+    } else {
+      groupDescription = 'Szkoła podstawowa (kl. 4-6) · Sale 1-4';
+    }
+
     setSeedSuccessNotice(
-      `Wstawiono realistyczny, zróżnicowany tygodniowy plan lekcji (27 godz., sale 1-4) dla klasy ${selectedClass}!`
+      `Pomyślnie wygenerowano unikalny plan dla klasy ${selectedClass} (${lessonsToInsert.length} lekcji, Sale 1-4). ${groupDescription}!`
     );
-    setTimeout(() => setSeedSuccessNotice(null), 4500);
+    setTimeout(() => setSeedSuccessNotice(null), 5000);
   };
 
   return (
@@ -498,44 +268,78 @@ export const TimetableView: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isTeacherOrAdmin && (
-            <button
-              onClick={handleQuickSeedPlan}
-              className={`px-3 py-1.5 border text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer ${
-                classLessons.length === 0
-                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-400 font-extrabold ring-1 ring-amber-300'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-              }`}
-              title="Wstaw realistyczny, zróżnicowany (pomieszany) plan zajęć z salami 1-4"
-            >
-              <Wand2 className="w-3.5 h-3.5 text-amber-700" />
-              <span>
-                {classLessons.length === 0
-                  ? 'Wstaw pomieszany plan (sale 1-4)'
-                  : 'Generuj pomieszany plan (sale 1-4)'}
-              </span>
-            </button>
+            <>
+              <button
+                onClick={() => handleQuickSeedPlan(false)}
+                className={`px-3 py-1.5 border text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                  classLessons.length === 0
+                    ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-400 font-extrabold ring-1 ring-amber-300'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+                title="Generuj plan dostosowany do programu nauczania tej klasy (sale 1-4)"
+              >
+                <Wand2 className="w-3.5 h-3.5 text-amber-700" />
+                <span>
+                  {classLessons.length === 0
+                    ? 'Generuj plan (Sale 1-4)'
+                    : 'Przegeneruj plan'}
+                </span>
+              </button>
+
+              <button
+                onClick={() => handleQuickSeedPlan(true)}
+                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer"
+                title="Wylosuj inny układ godzin i przedmiotów dla tej klasy"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <span>🎲 Pomieszaj losowo</span>
+              </button>
+            </>
           )}
 
           <button
             onClick={() => window.print()}
-            className="p-1.5 sm:px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs flex items-center space-x-1 cursor-pointer"
+            className="p-1.5 sm:px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs flex items-center space-x-1 cursor-pointer"
             title="Drukuj plan lekcji"
           >
             <Printer className="w-4 h-4 text-slate-500" />
-            <span className="hidden sm:inline">Drukuj plan</span>
+            <span className="hidden sm:inline">Drukuj</span>
           </button>
 
           {isTeacherOrAdmin && (
             <button
               onClick={() => setAddModalOpen(true)}
-              className="px-3.5 py-1.5 bg-[#1a365d] hover:bg-[#152c4d] text-white text-xs font-bold rounded-lg flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
+              className="px-3 py-1.5 bg-[#1a365d] hover:bg-[#152c4d] text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow-sm transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Dodaj lekcję do planu</span>
+              <span>+ Dodaj lekcję</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Curriculum Banner */}
+      <div className="px-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs flex flex-wrap items-center justify-between gap-2 text-slate-600">
+        <div className="flex items-center space-x-2">
+          <span className="font-extrabold text-slate-800">Program oddziału {selectedClass}:</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            getCurriculumGroup(selectedClass) === 'early'
+              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+              : getCurriculumGroup(selectedClass) === 'senior'
+              ? 'bg-purple-100 text-purple-900 border border-purple-300'
+              : 'bg-blue-100 text-blue-900 border border-blue-300'
+          }`}>
+            {getCurriculumGroup(selectedClass) === 'early'
+              ? 'Edukacja wczesnoszkolna (kl. 1-3)'
+              : getCurriculumGroup(selectedClass) === 'senior'
+              ? 'Klasy starsze (kl. 7-8: Chemia, Fizyka, Biologia, Niemiecki, WOS, EDB)'
+              : 'Szkoła podstawowa (kl. 4-6)'}
+          </span>
+        </div>
+        <div className="text-[11px] text-slate-500">
+          Wykorzystane sale: <strong className="text-slate-800">Sala 1, Sala 2, Sala 3, Sala 4</strong> (zgodnie z wytycznymi)
         </div>
       </div>
 

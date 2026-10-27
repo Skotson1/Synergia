@@ -231,8 +231,39 @@ async function startServer() {
       };
     }
 
-    if (Array.isArray(payload.users)) memoryDb.users = payload.users;
-    if (Array.isArray(payload.students)) memoryDb.students = payload.students;
+    // Smart merge collections so partial syncs or parallel clients never wipe existing data
+    if (Array.isArray(payload.users) && payload.users.length > 0) {
+      const userMap = new Map<string, any>();
+      for (const u of memoryDb.users) {
+        if (u && u.id) userMap.set(u.id, u);
+      }
+      for (const u of payload.users) {
+        if (u && u.id) userMap.set(u.id, u);
+      }
+      if (Array.isArray(payload.deletedUserIds)) {
+        for (const delId of payload.deletedUserIds) {
+          userMap.delete(delId);
+        }
+      }
+      memoryDb.users = Array.from(userMap.values());
+    }
+
+    if (Array.isArray(payload.students) && payload.students.length > 0) {
+      const studentMap = new Map<string, any>();
+      for (const s of memoryDb.students) {
+        if (s && s.id) studentMap.set(s.id, s);
+      }
+      for (const s of payload.students) {
+        if (s && s.id) studentMap.set(s.id, s);
+      }
+      if (Array.isArray(payload.deletedStudentIds)) {
+        for (const delId of payload.deletedStudentIds) {
+          studentMap.delete(delId);
+        }
+      }
+      memoryDb.students = Array.from(studentMap.values());
+    }
+
     if (Array.isArray(payload.grades)) memoryDb.grades = payload.grades;
     if (Array.isArray(payload.attendance)) memoryDb.attendance = payload.attendance;
     if (Array.isArray(payload.timetable)) memoryDb.timetable = payload.timetable;
@@ -249,7 +280,64 @@ async function startServer() {
       status: 'ok',
       updatedAt: memoryDb.updatedAt,
       isInitialized: memoryDb.systemConfig.isInitialized,
+      userCount: memoryDb.users.length,
+      studentCount: memoryDb.students.length,
     });
+  });
+
+  // POST /api/users: Atomic user creation and update (persisted directly to disk)
+  app.post('/api/users', (req, res) => {
+    const user = req.body;
+    if (!user || !user.id || !user.email) {
+      return res.status(400).json({ error: 'Nieprawidłowe dane użytkownika.' });
+    }
+    memoryDb = readDb();
+    const existingIndex = memoryDb.users.findIndex(u => u.id === user.id);
+    if (existingIndex >= 0) {
+      memoryDb.users[existingIndex] = { ...memoryDb.users[existingIndex], ...user };
+    } else {
+      memoryDb.users.unshift(user);
+    }
+    writeDb(memoryDb);
+    console.log(`[EduSynergia Server] User persisted: ${user.name} (${user.email}), Total users: ${memoryDb.users.length}`);
+    return res.json({ status: 'ok', user, totalUsers: memoryDb.users.length });
+  });
+
+  // DELETE /api/users/:id: Atomic user deletion
+  app.delete('/api/users/:id', (req, res) => {
+    const { id } = req.params;
+    memoryDb = readDb();
+    memoryDb.users = memoryDb.users.filter(u => u.id !== id);
+    writeDb(memoryDb);
+    console.log(`[EduSynergia Server] User deleted: ${id}, Remaining users: ${memoryDb.users.length}`);
+    return res.json({ status: 'ok', deletedId: id, remainingUsers: memoryDb.users.length });
+  });
+
+  // POST /api/students: Atomic student creation and update
+  app.post('/api/students', (req, res) => {
+    const student = req.body;
+    if (!student || !student.id) {
+      return res.status(400).json({ error: 'Nieprawidłowe dane ucznia.' });
+    }
+    memoryDb = readDb();
+    const existingIndex = memoryDb.students.findIndex(s => s.id === student.id);
+    if (existingIndex >= 0) {
+      memoryDb.students[existingIndex] = { ...memoryDb.students[existingIndex], ...student };
+    } else {
+      memoryDb.students.push(student);
+    }
+    writeDb(memoryDb);
+    console.log(`[EduSynergia Server] Student persisted: ${student.firstName} ${student.lastName} (${student.className}), Total students: ${memoryDb.students.length}`);
+    return res.json({ status: 'ok', student, totalStudents: memoryDb.students.length });
+  });
+
+  // DELETE /api/students/:id: Atomic student deletion
+  app.delete('/api/students/:id', (req, res) => {
+    const { id } = req.params;
+    memoryDb = readDb();
+    memoryDb.students = memoryDb.students.filter(s => s.id !== id);
+    writeDb(memoryDb);
+    return res.json({ status: 'ok', deletedId: id });
   });
 
   // POST /api/reset: Reset system back to uninitialized state (only when explicitly requested)

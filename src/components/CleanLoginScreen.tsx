@@ -87,8 +87,11 @@ export const CleanLoginScreen: React.FC<CleanLoginScreenProps> = ({ onSuccess })
     }
   };
 
-  const handleFillLogin = (email: string) => {
-    setLoginEmail(email);
+  const handleFillLogin = (user: { email: string; password?: string }) => {
+    setLoginEmail(user.email);
+    if (user.password) {
+      setLoginPassword(user.password);
+    }
     setLoginError('');
   };
 
@@ -295,26 +298,45 @@ export const CleanLoginScreen: React.FC<CleanLoginScreenProps> = ({ onSuccess })
             </button>
 
             {showHelperInfo && (
-              <div className="mt-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-2">
+              <div className="mt-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-2 max-h-56 overflow-y-auto">
+                <div className="font-bold text-[10px] uppercase text-slate-500 tracking-wider pb-1 border-b border-slate-200 flex justify-between items-center">
+                  <span>Zarejestrowane konta ({users.length})</span>
+                  <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-200">Zapisane trwale</span>
+                </div>
                 {users.length > 0 ? (
-                  users.slice(0, 4).map(u => (
-                    <div key={u.id} className="flex items-center justify-between py-1 border-b border-slate-200/50 last:border-none">
-                      <div>
-                        <strong className="text-slate-800">{u.roleTitle || u.role}:</strong>{' '}
-                        <code className="bg-slate-200 px-1 rounded text-[10px]">{u.email}</code>
+                  users.map(u => (
+                    <div key={u.id} className="flex items-center justify-between py-1.5 border-b border-slate-200/50 last:border-none">
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center space-x-1.5">
+                          <strong className="text-slate-900 truncate">{u.name}</strong>
+                          <span className={`text-[9px] px-1 rounded uppercase font-bold ${
+                            u.role === 'admin'
+                              ? 'bg-purple-100 text-purple-800'
+                              : u.role === 'teacher'
+                              ? 'bg-blue-100 text-blue-800'
+                              : u.role === 'parent'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {u.role === 'admin' ? 'Admin' : u.role === 'teacher' ? 'Nauczyciel' : u.role === 'parent' ? 'Rodzic' : 'Uczeń'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate">
+                          <code>{u.email}</code> {u.password ? `· hasło: ${u.password}` : ''}
+                        </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleFillLogin(u.email)}
-                        className="px-2 py-0.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded font-bold text-[10px] cursor-pointer"
+                        onClick={() => handleFillLogin(u)}
+                        className="px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg font-bold text-[10px] cursor-pointer shrink-0 transition-colors"
                       >
                         Wstaw
                       </button>
                     </div>
                   ))
                 ) : (
-                  <div className="text-slate-500 italic">
-                    Brak kont demonstracyjnych. Dziennik czeka na rejestrację pierwszego Administratora.
+                  <div className="text-slate-500 italic py-1">
+                    Brak kont. Dziennik czeka na rejestrację Administratora.
                   </div>
                 )}
               </div>

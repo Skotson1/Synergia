@@ -396,9 +396,10 @@ export const GradesView: React.FC = () => {
                   onClick={() => {
                     setSimulatedEntries(prev => [...prev, { subjectId: simSubjectId, value: simGradeVal, weight: simWeight }]);
                   }}
-                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors"
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors flex items-center space-x-1.5 cursor-pointer active:scale-95"
                 >
-                  + Dodaj ocenę
+                  <Calculator className="w-3.5 h-3.5" />
+                  <span>Oblicz w symulatorze</span>
                 </button>
               </div>
             </div>
@@ -442,6 +443,37 @@ export const GradesView: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Active simulated chips list */}
+          {simulatedEntries.length > 0 && (
+            <div className="mt-3 pt-2.5 border-t border-amber-200 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-extrabold text-amber-900 uppercase">
+                Symulowane hipotetyczne oceny ({simulatedEntries.length}):
+              </span>
+              {simulatedEntries.map((se, i) => {
+                const sObj = subjects.find(s => s.id === se.subjectId);
+                return (
+                  <span
+                    key={i}
+                    className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-white text-amber-950 text-[10px] font-bold border border-amber-300 shadow-2xs"
+                  >
+                    <span>{sObj?.name || 'Przedmiot'}: ocena <strong>{se.value}</strong> (waga {se.weight})</span>
+                    <button
+                      type="button"
+                      onClick={() => setSimulatedEntries(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-rose-600 hover:text-rose-800 font-black ml-1 text-xs"
+                      title="Usuń z symulacji"
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[10px] text-amber-800/80 italic mt-2">
+            * Symulator średniej to narzędzie poglądowe ("Co jeśli?"). Wpisy w kalkulatorze nie są ocenami w dzienniku i nie modyfikują oficjalnej karty ocen.
+          </p>
         </div>
       )}
 
